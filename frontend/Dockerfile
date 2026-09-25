@@ -17,6 +17,10 @@ FROM nginxinc/nginx-unprivileged:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY default.conf.template /etc/nginx/templates/default.conf.template
 
+# Restrict envsubst to only substitute $BACKEND_URL in default.conf.template.
+# This protects internal Nginx variables ($backend_url, $host, $uri, etc.) from being erased.
+ENV NGINX_ENVSUBST_FILTER="BACKEND_URL"
+
 # Have the image derive the DNS resolver from /etc/resolv.conf, so the same
 # image proxies to the backend on Docker, Podman, Kubernetes and Railway with
 # no per-platform configuration. 19-resolver.envsh turns that into
