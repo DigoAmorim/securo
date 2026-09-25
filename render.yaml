@@ -1,0 +1,106 @@
+version: "1"
+
+# 1. Banco de Dados PostgreSQL (com suporte a pgvector a partir da v15+)
+databases:
+  - name: securo-db
+    databaseName: securo
+    user: postgres
+    postgresMajorVersion: "16"
+    plan: free
+
+services:
+  # 2. Instância do Redis
+  - type: redis
+    name: securo-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
+  # 3. Backend (FastAPI / Uvicorn)
+  - type: web
+    name: securo-backend
+    env: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: securo-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: securo-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: LOCAL_AUTH_ENABLED
+        value: "true"
+      - key: TESOURO_DIRETO_ENABLED
+        value: "true"
+      - key: FX_SYNC_MODE
+        value: on_demand
+      - key: AGENTS_ENABLED
+        value: "false"
+      - key: FRONTEND_URL
+        sync: false # Você preenche no painel após o deploy do frontend
+
+  # 4. Frontend Web App
+  - type: web
+    name: securo-frontend
+    env: docker
+    dockerContext: ./frontend
+    dockerfilePath: ./frontend/Dockerfile
+    plan: free
+    envVars:
+      - key: BACKEND_URL
+        fromService:
+          type: web
+          name: securo-backend
+          property: url
+
+  # 5. Worker do Celery (Processamento em segundo plano)
+  - type: worker
+    name: securo-celery-worker
+    env: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: starter # Workers no Render exigem plano Starter ou superior
+    startCommand: celery -A app.worker worker --loglevel=info --concurrency=2
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: securo-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: securo-redis
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: securo-backend
+          envVarKey: SECRET_KEY
+
+  # 6. Celery Beat (Agendador de tarefas)
+  - type: worker
+    name: securo-celery-beat
+    env: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: starter
+    startCommand: celery -A app.worker beat --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: securo-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: securo-redis
+          property: connectionString
