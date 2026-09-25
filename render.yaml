@@ -1,19 +1,19 @@
 version: "1"
 
-# 1. Banco de Dados PostgreSQL (com suporte a pgvector a partir da v15+)
+# 1. PostgreSQL Database
 databases:
   - name: securo-db
     databaseName: securo
-    user: postgres
     postgresMajorVersion: "16"
     plan: free
 
 services:
-  # 2. Instância do Redis
+  # 2. Redis Instance
   - type: redis
     name: securo-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # Empty array means only internal Render services can connect
 
   # 3. Backend (FastAPI / Uvicorn)
   - type: web
@@ -22,7 +22,7 @@ services:
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
     plan: free
-    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    dockerCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -46,7 +46,7 @@ services:
       - key: AGENTS_ENABLED
         value: "false"
       - key: FRONTEND_URL
-        sync: false # Você preenche no painel após o deploy do frontend
+        sync: false 
 
   # 4. Frontend Web App
   - type: web
@@ -57,19 +57,16 @@ services:
     plan: free
     envVars:
       - key: BACKEND_URL
-        fromService:
-          type: web
-          name: securo-backend
-          property: url
+        sync: false # You will fill this in the Render dashboard later
 
-  # 5. Worker do Celery (Processamento em segundo plano)
+  # 5. Celery Worker
   - type: worker
     name: securo-celery-worker
     env: docker
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
-    plan: starter # Workers no Render exigem plano Starter ou superior
-    startCommand: celery -A app.worker worker --loglevel=info --concurrency=2
+    plan: starter 
+    dockerCommand: celery -A app.worker worker --loglevel=info --concurrency=2
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -86,14 +83,14 @@ services:
           name: securo-backend
           envVarKey: SECRET_KEY
 
-  # 6. Celery Beat (Agendador de tarefas)
+  # 6. Celery Beat
   - type: worker
     name: securo-celery-beat
     env: docker
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
     plan: starter
-    startCommand: celery -A app.worker beat --loglevel=info
+    dockerCommand: celery -A app.worker beat --loglevel=info
     envVars:
       - key: DATABASE_URL
         fromDatabase:
