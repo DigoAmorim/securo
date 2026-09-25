@@ -13,16 +13,17 @@ services:
     name: securo-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
-    ipAllowList: [] # Empty array means only internal Render services can connect
+    ipAllowList: []
 
-  # 3. Backend (FastAPI / Uvicorn)
+  # 3. Backend (FastAPI + Celery all-in-one)
   - type: web
     name: securo-backend
     env: docker
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
     plan: free
-    dockerCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Runs the migrations, starts the celery worker in the background (&), and then starts the web server.
+    dockerCommand: alembic upgrade head && (celery -A app.worker worker --loglevel=info --concurrency=1 &) && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -57,47 +58,4 @@ services:
     plan: free
     envVars:
       - key: BACKEND_URL
-        sync: false # You will fill this in the Render dashboard later
-
-  # 5. Celery Worker
-  - type: worker
-    name: securo-celery-worker
-    env: docker
-    dockerContext: ./backend
-    dockerfilePath: ./backend/Dockerfile
-    plan: starter 
-    dockerCommand: celery -A app.worker worker --loglevel=info --concurrency=2
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: securo-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: securo-redis
-          property: connectionString
-      - key: SECRET_KEY
-        fromService:
-          type: web
-          name: securo-backend
-          envVarKey: SECRET_KEY
-
-  # 6. Celery Beat
-  - type: worker
-    name: securo-celery-beat
-    env: docker
-    dockerContext: ./backend
-    dockerfilePath: ./backend/Dockerfile
-    plan: starter
-    dockerCommand: celery -A app.worker beat --loglevel=info
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: securo-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: securo-redis
-          property: connectionString
+        sync: false
